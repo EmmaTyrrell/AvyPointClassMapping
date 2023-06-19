@@ -1,0 +1,160 @@
+# script to map avalanches from CAIC data
+
+# import directories
+import arcpy
+from arcpy.sa import *
+import os
+print("imported modules")
+
+# establish parameters
+# set master workspace and overwrite conditions
+arcpy.env.workspace = "C:\\Users\\Emma Tyrrell\\Documents\\PSU_SDS\\THESIS_230226"
+projectBoundary = (arcpy.env.workspace + "\\Data\\StaticDataGDB.gdb\\ProjectBoundary")
+gdbName = (arcpy.env.workspace + "\\Data\\StaticDataGDB.gdb")
+mosaicBit = 1
+mosaicPixelType = "32_BIT_FLOAT"
+GCSsr = arcpy.SpatialReference(4326)
+PCSsr = arcpy.SpatialReference(6432)
+arcpy.env.overwriteOutput = True
+arcpy.env.qualifiedFieldNames = False
+print("master parameters established")
+
+# set terrain data workspace
+terrainDataFilesWorkspace = (arcpy.env.workspace + "\\Data\\TerrainData")
+slopeOutputFiles = (terrainDataFilesWorkspace + "\\SlopeOutputFiles")
+aspectOutputFiles = (terrainDataFilesWorkspace + "\\AspectOutputFiles")
+demFiles = (arcpy.env.workspace + "\\Data\\DEM")
+mosaicAspectName = "aspectMosaic"
+mosaicSlopeName = "slopeMosaic"
+TESTslopeDBF = (terrainDataFilesWorkspace + "\\testJan2022AvySlope.dbf")
+print("terrain parameters established")
+
+# set avy data workspace
+AvyDataWorkspace = "C:\\Users\\Emma Tyrrell\\Documents\\PSU_SDS\\THESIS_230226\\Data\\AvyData"
+Jan2022AvyTable = (AvyDataWorkspace + "\\2022\\CAICAvyExplorer_Jan22.csv")
+xField = "X_Coord"
+yField = "Y_Coord"
+outAvyPointClass = (AvyDataWorkspace + "\\TestAvyPointClass.shp")
+projectedAvyOutPointClass = (AvyDataWorkspace + "\\TestAvyPointClass_projected.shp")
+avyPointClipped = (AvyDataWorkspace + "\\TestAvyPointClass_Clipped.shp")
+print("avy parameters established")
+
+# export data workspace
+outputData = "C:\\Users\\Emma Tyrrell\\Documents\\PSU_SDS\\THESIS_230226\\Data\\OutputData"
+testSlopeAvyPointOutput = (outputData + "\\testAvySlopePointclass.shp")
+print("output data parameters established")
+
+# Prep shapefiles
+try:
+    # run tool for XY class
+    arcpy.XYTableToPoint_management(Jan2022AvyTable, outAvyPointClass, xField, yField, "", GCSsr)
+    print("point class created")
+
+    # project class into proper coordinate system
+    arcpy.Project_management(outAvyPointClass, projectedAvyOutPointClass, PCSsr)
+    print("coordinate system projected")
+
+    # clip avy features
+    arcpy.Clip_analysis(projectedAvyOutPointClass, projectBoundary, avyPointClipped)
+    print("clipped avy feature")
+
+except Exception as ex:
+    print(ex)
+
+# create slope + mosaic
+walk = arcpy.da.Walk(demFiles, topdown=True, datatype="RasterDataset")
+try:
+    # walk for slope
+    for dirpath, dirnames, filenames in walk:
+        for filename in filenames:
+
+            shapefile_slope = f"slope_{filename[:-13]}_.tif"
+
+            # run slope tool
+            try:
+                # conduct slope
+                outSlope = Slope(os.path.join(dirpath, filename), "DEGREE", 1, "PLANAR", "", "GPU_THEN_CPU")
+                print(shapefile_slope + " slope executed")
+
+                # save slope
+                outSlope.save(slopeOutputFiles + "\\" + shapefile_slope)
+                print(shapefile_slope + " slope saved")
+
+            except Exception as ex:
+                print(ex)
+
+    # create mosaic dataset
+    arcpy.CreateMosaicDataset_management(gdbName, mosaicSlopeName, PCSsr, mosaicBit, mosaicPixelType)
+    print("slope mosaic created")
+
+    # add rasters to raster dataset
+    walk = arcpy.da.Walk(slopeOutputFiles, topdown=True, datatype="RasterDataset")
+    for dirpath, dirnames, filenames in walk:
+        for filename in filenames:
+            arcpy.AddRastersToMosaicDataset_management((gdbName + "\\" + mosaicSlopeName), "Raster Dataset",
+                                                       os.path.join(dirpath, filename), "", "", "UPDATE_OVERVIEWS",
+                                                       "", "", "", PCSsr, "", "", "", "BUILD_PYRAMIDS",
+                                                       "CALCULATE_STATISTICS", "BUILD_THUMBNAILS")
+            print(filename + " added to mosaic")
+
+except Exception as ex:
+    print(ex)
+
+# add aspect + mosaic
+walk = arcpy.da.Walk(demFiles, topdown=True, datatype="RasterDataset")
+try:
+    # walk for slope
+    for dirpath, dirnames, filenames in walk:
+        for filename in filenames:
+            shapefile_aspect = f"aspect_{filename[:-13]}_.tif"
+
+            try:
+                # conduct aspect
+                outAspect = Aspect(os.path.join(dirpath, filename), "PLANAR", "", "", "GPU_THEN_CPU")
+                print(shapefile_aspect + " aspect executed")
+
+                # save aspect
+                outAspect.save(aspectOutputFiles + "\\" + shapefile_aspect)
+                print(shapefile_aspect + "aspect saved")
+
+            except Exception as ex:
+                print(ex)
+
+    # create mosaic dataset
+    arcpy.CreateMosaicDataset_management(gdbName, mosaicAspectName, PCSsr, mosaicBit, mosaicPixelType)
+    print("aspect mosaic created")
+
+    # add rasters to raster dataset
+    walk = arcpy.da.Walk(aspectOutputFiles, topdown=True, datatype="RasterDataset")
+    for dirpath, dirnames, filenames in walk:
+        for filename in filenames:
+            arcpy.AddRastersToMosaicDataset_management((gdbName + "\\" + mosaicAspectName),
+                                                       "Raster Dataset", os.path.join(dirpath, filename),
+                                                       "", "", "UPDATE_OVERVIEWS", "", "", "", PCSsr, "", "",
+                                                       "", "BUILD_PYRAMIDS", "CALCULATE_STATISTICS",
+                                                       "BUILD_THUMBNAILS")
+            print(filename + " added to mosaic")
+
+except Exception as ex:
+    print(ex)
+
+# try to extract points from files with sample
+try:
+    # create point class
+    arcpy.CreateFeatureclass_management(outputData, "testAvySlopePointclass.shp", "POINT", avyPointClipped, "", "",
+                                        PCSsr)
+    print("feature class created for avalanche raster data")
+
+    # copy features to point class
+    arcpy.CopyFeatures_management(avyPointClipped, testSlopeAvyPointOutput)
+    print("features copied")
+
+    # sample points from slope files
+    Sample([(gdbName + "\\" + mosaicSlopeName), (gdbName + "\\" + mosaicAspectName)], avyPointClipped,
+           testSlopeAvyPointOutput, "NEAREST", "FID", "", "", "",
+           "", "", "ROW_WISE", "FEATURE_CLASS")
+
+    print("files sampled")
+
+except Exception as ex:
+    print(ex)
