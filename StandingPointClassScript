@@ -1,0 +1,135 @@
+# script to map avalanches from CAIC data
+
+# import directories
+import arcpy
+print("imported modules")
+
+# establish parameters
+# set master workspace and overwrite conditions
+arcpy.env.workspace = "C:\\Users\\Emma Tyrrell\\Documents\\PSU_SDS\\THESIS_230226"
+projectBoundary = (arcpy.env.workspace + "\\Data\\StaticDataGDB.gdb\\ProjectBoundary")
+gdbName = (arcpy.env.workspace + "\\Data\\StaticDataGDB.gdb")
+mosaicBit = 1
+mosaicPixelType = "32_BIT_FLOAT"
+GCSsr = arcpy.SpatialReference(4326)
+PCSsr = arcpy.SpatialReference(6432)
+arcpy.env.overwriteOutput = True
+arcpy.env.qualifiedFieldNames = False
+finalAvyPointClass = (gdbName + "\\finalAvyPointClassRasterData")
+print("master parameters established")
+
+# set terrain data workspace
+terrainDataFilesWorkspace = (arcpy.env.workspace + "\\Data\\TerrainData")
+slopeOutputFiles = (terrainDataFilesWorkspace + "\\SlopeOutputFiles")
+aspectOutputFiles = (terrainDataFilesWorkspace + "\\AspectOutputFiles")
+demFiles = (arcpy.env.workspace + "\\Data\\DEM")
+mosaicAspectName = "aspectMosaic"
+mosaicSlopeName = "slopeMosaic"
+print("terrain parameters established")
+
+# set avy data workspace
+AvyDataWorkspace = (arcpy.env.workspace + "\\Data\\AvyData")
+AvyTable = (AvyDataWorkspace + "\\2022\\CAICAvyExplorer_Jan22.csv")
+xField = "X_Coord"
+yField = "Y_Coord"
+outAvyPointClass = (AvyDataWorkspace + "\\AvyPointClass.shp")
+projectedAvyOutPointClass = (AvyDataWorkspace + "\\AvyPointClass_projected.shp")
+avyPointClipped = (gdbName + "\\AvyPointClass_ClippedFinal")
+print("avy parameters established")
+
+# export data workspace
+testSlopeAspectAvyPointOutput = (gdbName + "\\testAvySlopeAspectPointclass")
+print("output data parameters established")
+# collapse
+
+# create feature point class for avalanche data that's consistent with HRRR model data
+try:
+    # run tool for XY class
+    arcpy.XYTableToPoint_management(AvyTable, outAvyPointClass, xField, yField, "", GCSsr)
+    print("point class created")
+
+    # project class into proper coordinate system
+    arcpy.Project_management(outAvyPointClass, projectedAvyOutPointClass, PCSsr)
+    print("coordinate system projected")
+
+    # add field for StdDate
+    arcpy.AddField_management(projectedAvyOutPointClass, "StdDate", "TEXT", "", "", 11, "", "NULLABLE", "REQUIRED")
+    print("field added")
+
+    # create fields for year, month, date, mountain range, and climate
+    try:
+        # year
+        arcpy.AddField_management(projectedAvyOutPointClass, "_Year", "SHORT", "", "", 4, "_Year", "NON_NULLABLE",
+                                  "REQUIRED")
+        print("year field created")
+        arcpy.CalculateField_management(projectedAvyOutPointClass, "_Year", "!Year!", "PYTHON3")
+        print("year field calculated")
+        # month
+        arcpy.AddField_management(projectedAvyOutPointClass, "_Month", "SHORT", "", "", 2, "_Month", "NON_NULLABLE",
+                                  "REQUIRED")
+        print("month field created")
+        arcpy.CalculateField_management(projectedAvyOutPointClass, "_Month", "!Month!", "PYTHON3")
+        print("month field calculated")
+
+        # day
+        arcpy.AddField_management(projectedAvyOutPointClass, "_Day", "SHORT", "", "", 2, "_Day", "NON_NULLABLE",
+                                  "REQUIRED")
+        print("day field created")
+        arcpy.CalculateField_management(projectedAvyOutPointClass, "_Day", "!Day!", "PYTHON3")
+        print("day field calculated")
+
+    except Exception as ex:
+        print(ex)
+
+    # # calculate date fields for point
+    # try:
+    #     fc = projectedAvyOutPointClass
+    #     fields = ["_Month", "_Day"]
+    #     print("feature class and fields established")
+    #
+    #     with arcpy.da.UpdateCursor(fc, fields) as cursor:
+    #         for row in cursor:
+    #             if row[1] < 10:
+    #                 StdDateExpression01 = '"!_Year!" + "-" + "0" + "!_Month!" + "-" + "0" + "!_Day!"'
+    #                 arcpy.CalculateField_management(projectedAvyOutPointClass, "StdDate", StdDateExpression01,
+    #                                                 "PYTHON3")
+    #
+    #             elif row[1] > 9:
+    #                 StdDateExpression02 = '"!_Year!" + "-" + "0" + "!_Month!" + "-" + "!_Day!"'
+    #                 arcpy.CalculateField_management(projectedAvyOutPointClass, "StdDate", StdDateExpression02,
+    #                                                 "PYTHON3")
+    #             cursor.updateRow(row)
+    #
+    #     # with arcpy.da.UpdateCursor(fc, fields) as cursor:
+    #     #     for row in cursor:
+    #     #         if row[0] > 9 and row[1] > 9:
+    #     #             StdDateExpression03 = '"!_Year!" + "-" + "!_Month!" + "-" + "!_Day!"'
+    #     #             arcpy.CalculateField_management(projectedAvyOutPointClass, "StdDate", StdDateExpression03,
+    #     #                                             "PYTHON3", "", "DATE")
+    #     #         cursor.updateRow(row)
+    #     #
+    #     # with arcpy.da.UpdateCursor(fc, fields) as cursor:
+    #     #     for row in cursor:
+    #     #         if row[0] > 9 and row[1] < 10:
+    #     #             StdDateExpression04 = '"!_Year!" + "-" + "!_Month!" + "-" + "0" + "!_Day!"'
+    #     #             arcpy.CalculateField_management(projectedAvyOutPointClass, "StdDate", StdDateExpression04,
+    #     #                                             "PYTHON3", "", "DATE")
+    #     #         cursor.updateRow(row)
+    #
+    #     print("fields updated")
+    # except Exception as ex:
+    #     print(ex)
+    
+    # clip and delete features
+    try:
+        # clip avy features
+        arcpy.Clip_analysis(projectedAvyOutPointClass, projectBoundary, avyPointClipped)
+        print("clipped avy feature")
+
+        # delete working files
+        arcpy.Delete_management([outAvyPointClass, projectedAvyOutPointClass])
+        print("memory classes deleted")
+    except Exception as ex:
+        print(ex)
+except Exception as ex:
+    print(ex)
